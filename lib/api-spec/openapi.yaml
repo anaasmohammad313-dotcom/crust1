@@ -1,0 +1,472 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: Restaurant POS billing and order management API
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: menu
+    description: Menu categories and items
+  - name: orders
+    description: Order taking, billing, and history
+  - name: settings
+    description: POS-wide configuration
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /menu-categories:
+    get:
+      operationId: listMenuCategories
+      tags: [menu]
+      summary: List menu categories with their items
+      description: Returns every category with its (active) menu items nested, for building the order screen
+      responses:
+        "200":
+          description: List of categories with items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MenuCategoryWithItems"
+
+  /menu-items:
+    get:
+      operationId: listMenuItems
+      tags: [menu]
+      summary: List all menu items (flat)
+      responses:
+        "200":
+          description: List of menu items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MenuItem"
+    post:
+      operationId: createMenuItem
+      tags: [menu]
+      summary: Create a menu item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MenuItemInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MenuItem"
+
+  /menu-items/{id}:
+    patch:
+      operationId: updateMenuItem
+      tags: [menu]
+      summary: Update a menu item (e.g. change price or active status)
+      description: Only future orders use the new price; previously generated bills retain their original recorded price.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MenuItemUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MenuItem"
+        "404":
+          description: Not found
+
+  /orders:
+    get:
+      operationId: listOrders
+      tags: [orders]
+      summary: Search / list orders (order history)
+      parameters:
+        - name: invoiceNumber
+          in: query
+          schema:
+            type: string
+        - name: orderId
+          in: query
+          schema:
+            type: integer
+        - name: customerName
+          in: query
+          schema:
+            type: string
+        - name: phoneNumber
+          in: query
+          schema:
+            type: string
+        - name: tableNumber
+          in: query
+          schema:
+            type: string
+        - name: date
+          in: query
+          description: Calendar date (YYYY-MM-DD) to filter orders placed on that day
+          schema:
+            type: string
+        - name: paymentMethod
+          in: query
+          schema:
+            $ref: "#/components/schemas/PaymentMethod"
+      responses:
+        "200":
+          description: List of orders (summary, without line items)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OrderSummary"
+    post:
+      operationId: createOrder
+      tags: [orders]
+      summary: Create a new order and generate its bill
+      description: Prices are captured from the current menu item price at the time of sale.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderInput"
+      responses:
+        "201":
+          description: Created order with generated invoice number and totals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          description: Invalid order
+
+  /orders/{id}:
+    get:
+      operationId: getOrder
+      tags: [orders]
+      summary: Get a single order with full line items (for viewing/reprinting an invoice)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Order detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "404":
+          description: Not found
+
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get POS-wide configuration (e.g. max table count)
+      responses:
+        "200":
+          description: Current settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+    patch:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update POS-wide configuration (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettingsUpdate"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+
+  /orders/{id}/status:
+    patch:
+      operationId: updateOrderStatus
+      tags: [orders]
+      summary: Cancel or refund an order (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderStatusUpdate"
+      responses:
+        "200":
+          description: Updated order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "404":
+          description: Not found
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    PaymentMethod:
+      type: string
+      enum: [cash, upi, card, pending]
+
+    OrderStatus:
+      type: string
+      enum: [paid, cancelled, refunded]
+
+    DiscountType:
+      type: string
+      enum: [amount, percent]
+
+    MenuItem:
+      type: object
+      required: [id, categoryId, name, price, active, imageUrl]
+      properties:
+        id:
+          type: integer
+        categoryId:
+          type: integer
+        name:
+          type: string
+        price:
+          type: number
+        active:
+          type: boolean
+        imageUrl:
+          type: ["string", "null"]
+
+    MenuItemInput:
+      type: object
+      required: [categoryId, name, price]
+      properties:
+        categoryId:
+          type: integer
+        name:
+          type: string
+          minLength: 1
+        price:
+          type: number
+          minimum: 0
+        active:
+          type: boolean
+        imageUrl:
+          type: ["string", "null"]
+
+    MenuItemUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        price:
+          type: number
+          minimum: 0
+        active:
+          type: boolean
+        categoryId:
+          type: integer
+        imageUrl:
+          type: ["string", "null"]
+
+    MenuCategoryWithItems:
+      type: object
+      required: [id, name, sortOrder, items]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        sortOrder:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MenuItem"
+
+    OrderItemInput:
+      type: object
+      required: [menuItemId, quantity]
+      properties:
+        menuItemId:
+          type: integer
+        quantity:
+          type: integer
+          minimum: 1
+
+    OrderInput:
+      type: object
+      required: [tableNumber, items, paymentMethod]
+      properties:
+        customerName:
+          type: ["string", "null"]
+        phoneNumber:
+          type: ["string", "null"]
+        tableNumber:
+          type: string
+        cashierName:
+          type: ["string", "null"]
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/OrderItemInput"
+        discountType:
+          oneOf:
+            - $ref: "#/components/schemas/DiscountType"
+            - type: "null"
+        discountValue:
+          type: ["number", "null"]
+        paymentMethod:
+          $ref: "#/components/schemas/PaymentMethod"
+
+    OrderStatusUpdate:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: "#/components/schemas/OrderStatus"
+
+    OrderLineItem:
+      type: object
+      required: [id, menuItemId, name, unitPrice, quantity, itemTotal]
+      properties:
+        id:
+          type: integer
+        menuItemId:
+          type: integer
+        name:
+          type: string
+        unitPrice:
+          type: number
+        quantity:
+          type: integer
+        itemTotal:
+          type: number
+
+    OrderSummary:
+      type: object
+      required:
+        - id
+        - invoiceNumber
+        - customerName
+        - phoneNumber
+        - tableNumber
+        - subtotal
+        - discountType
+        - discountValue
+        - total
+        - paymentMethod
+        - cashierName
+        - status
+        - createdAt
+      properties:
+        id:
+          type: integer
+        invoiceNumber:
+          type: string
+        customerName:
+          type: ["string", "null"]
+        phoneNumber:
+          type: ["string", "null"]
+        tableNumber:
+          type: string
+        subtotal:
+          type: number
+        discountType:
+          oneOf:
+            - $ref: "#/components/schemas/DiscountType"
+            - type: "null"
+        discountValue:
+          type: ["number", "null"]
+        total:
+          type: number
+        paymentMethod:
+          $ref: "#/components/schemas/PaymentMethod"
+        cashierName:
+          type: ["string", "null"]
+        status:
+          $ref: "#/components/schemas/OrderStatus"
+        createdAt:
+          type: string
+          format: date-time
+
+    Settings:
+      type: object
+      required: [maxTables]
+      properties:
+        maxTables:
+          type: integer
+          minimum: 1
+
+    SettingsUpdate:
+      type: object
+      required: [maxTables]
+      properties:
+        maxTables:
+          type: integer
+          minimum: 1
+
+    Order:
+      allOf:
+        - $ref: "#/components/schemas/OrderSummary"
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/OrderLineItem"
